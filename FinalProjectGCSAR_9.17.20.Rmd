@@ -1,0 +1,376 @@
+---
+title: "GCSAR Final Project: Bending Rules for Terrestrial Locomotion"
+date: "1 May 2020"
+author: "Brooke Quinn"
+output: 
+  html_document:
+    theme: 'yeti'
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+```{r load necessary packages, include = FALSE}
+require(phytools)
+require(geiger)
+require(ape)
+require(readxl)
+require(picante)
+require(car)
+
+require(dplyr)
+require(tidyverse)
+require(phylosignal)
+require(phylobase)
+require(factoextra)
+require(ggplot2)
+require(dismo)
+require(kableExtra)
+
+```
+
+```{r load and tidy data, include = FALSE}
+
+## Load data
+mydata <- read.csv("C:/Users/brook/Documents/Hsieh Lab/Flexible Feet Project/FinalFootFlexTrees_noReptile.csv", header = TRUE, skipNul = TRUE, check.names = F)
+species <- read_excel("C:/Users/brook/Documents/R/FFP/species_names_FFP.xlsx")
+mammalTree <- read.nexus('vertLife.mammalTree.nex')
+birdTree <- read.nexus('vertLife.birdTree.nex')
+
+# Clean data
+mydata.1 <- mydata %>%
+  separate(SpeciesName, into = c("Genus", "Species"), sep = ' ') %>% 
+  unite(SpeciesTreeLabel, Genus, Species, sep = "_")  #ignored rows 53, 79, 102: check this later! Not sure why 
+
+# Aggregate data by species tree label and find means
+traitCols <- c(2,5,10) # species name, mean angle, mean ratio
+for(trait in traitCols){
+  newmeans <- aggregate(mydata.1[,c(5,10)], list(mydata.1$SpeciesTreeLabel), FUN=mean)
+}
+colnames(newmeans)[1] <- "SpeciesTreeLabel"
+
+write.table(newmeans,file="SpeciesMeanTraitValues.txt",col.names=NA,sep="\t")
+
+data.prunedMamTree <- newmeans[(newmeans$SpeciesTreeLabel%in%mammalTree$tip.label),]
+rownames(data.prunedMamTree) <- data.prunedMamTree$SpeciesTreeLabel
+
+data.prunedBirdTree <- newmeans[(newmeans$SpeciesTreeLabel%in%birdTree$tip.label),]
+rownames(data.prunedBirdTree) <- data.prunedBirdTree$SpeciesTreeLabel
+
+# Subset of data set including foot posture
+traitCols2 <- c(2,5,10,17:20)
+mydata.1[,traitCols2] %>% 
+  group_by(SpeciesTreeLabel) %>% 
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  summarize(avgAngle = mean(MeanAngle), avgRatio = mean(MeanRatio)) %>% 
+  group_by(SpeciesTreeLabel) -> mydata.2
+
+mydata.1[,c(2,17:20)] %>%
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  full_join(mydata.2, newmeans, by = "SpeciesTreeLabel") %>%
+  arrange(FootPosture) -> mydata.FP
+
+```
+
+# 1. Aim
+Traditionally, propulsors such as wings and fins have been modeled as rigid appendages and more novel attempts at modeling vorticity, like Birch and Dickinson’s (2001) mechanical fly, have been proposed (fig. 1). However, recent work has shown how flexibility is actually a key characteristic that can enhance thrust production in a range of animals crossing diverse taxa and across wide size scales (Colin et al., 2012) (fig. 2). This project was modeled after a previous paper by Lucas et al. (2014) which showed that when swimming and flying, all animals observed in the study moved their propulsors using predictable, characteristic motions, regardless of the substrate/medium and phylogenetic history (fig. 3). For my final project, I will research whether similar sets of rules apply during terrestrial locomotion. I would like to address whether common patterns for bending exist across a diverse array of terrestrial vertebrates, and whether these patterns are due to phylogenetic relationships. 
+
+![Figure 1: Mechanical fly design by Birch and Dickinson (2001).](images/mechfly.jpg)
+
+
+![Figure 2: Flexibility of bell segments in jellyfish by Colin et al. (2012).](images/jellyfish.jpg)
+
+
+
+![Figure 3: Flexion angles and ratios for range of species moving in fluid environment. (Lucas et al., 2012).](images/lucas.png)
+
+# 2. Question and Problem
+Is terrestrial locomotion in mammals and birds constrained by a set of bending rules?
+
+
+# 3. Scope
+The data for this project were collected using videos of animals that were originally filmed across the world. Location was not a relevant aspect of this project on the macro scale. Some attributes of location (i.e., which substrates the animals walk on) were included in supplementary analyses to account for comparability between videos. I hope to generalize these results to most or all terrestrial vertebrates, but likely to the classes Mammalia and Aves as the current dataset contains 95 species within these classes. 
+
+
+# 4. Methods
+Videos of animals in the classes Mammalia and Aves used in this project were collected via two main sources: open-source platforms (e.g. YouTube) and directly from individuals via email (e.g. contacted biomechanists individually). The data were taken from these videos by digitizing points of interest at specific frames of these videos if the videos were deemed to be high-quality enough to warrant inclusion in the collection. Custom code to digitize these points already existed in MATLAB, so the initial part of the analysis was completed in MATLAB instead of R. Data analysis was performed using custom calculations to extract the variables of interest (e.g. bending angle, ratio) and relevant functions in R. 
+
+
+# 5. Results
+I expect to find patterns for bending as quantified by bending angle (BA) and bending ratio (BR) (fig. 4). In examining a morphospace comparing the bending metrics on each axis, I would expect grouping by phylogenetic order to show average constraints on these measurements. I believe I will find a significant relationship between bending angle and bending ratio. Further, I expect to see differences in bending metrics between different foot postures (i.e. plantigrade, digitigrade, unguligrade; seen in fig. 5) which are unrelated to phylogeny as evidenced by the output of phylogenetic signal. 
+
+![Figure 4: Schematic diagram of bending angle (θ) and bending ratio (A / A+B) of terrestrial vertebrates (Quinn et al., in progress).](images/bending metrics.png)
+
+![Figure 5: Foot posture categories: plantigrade, digitigrade, unguligrade (http://anthroanatomica.blogspot.com/).](images/footposture.jpg)
+
+* Mean Bending Metrics for Each Species
+  * Bending Angle
+```{r plot mean angle by species, fig.width=18, fig.height=10, fig.aligh = 'center', echo = FALSE}
+
+ggplot(data = mydata.FP) + 
+  geom_point(mapping = aes(x = SpeciesTreeLabel, y = avgAngle)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), text = element_text(size= 18)) + 
+  scale_x_discrete(expand = c(.01,.05)) + 
+  labs(y = "Mean Angle (degrees)", x = "Species", title = "Mean Bending Ratio by Species")
+
+```
+  * Bending Ratio
+```{r plot mean angle and ratio by species, fig.width=18, fig.height=10, fig.align = 'center', echo = FALSE}
+ggplot(data = mydata.FP) + 
+  geom_point(mapping = aes(x = SpeciesTreeLabel, y = avgRatio)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), text = element_text(size= 18)) + 
+  scale_x_discrete(expand = c(.01,.05)) + 
+  labs(y = "Mean Ratio", x = "Species")
+```
+
+
+* Mean Bending Metrics for Each Species Separated by Foot Posture
+  * Bending Angle
+    * The bending angle is highest for ungulates, meaning that they exhibit a more upright posture while plantigrade animals have the lowest bending angle, indicating a more crouched posture. 
+```{r plot mean angle by species, color by foot posture, fig.width=30, fig.align = 'center', fig.asp = .5, echo = FALSE}
+
+mydata.FP[mydata.FP$FootPosture == 'Digitigrade', c(6,7)] %>%
+  summarize(DigAngle = mean(avgAngle), DigRatio = mean(avgRatio)) -> DigAngleRatio
+
+mydata.FP[mydata.FP$FootPosture2Dig == 'Plantigrade', c(6,7)] %>%
+  summarize(PlantAngle = mean(avgAngle), PlantRatio = mean(avgRatio)) -> PlantAngleRatio
+
+mydata.FP[mydata.FP$FootPosture2Dig == 'Unguligrade', c(6,7)] %>%
+  summarize(UngAngle = mean(avgAngle), UngRatio = mean(avgRatio)) -> UngAngleRatio
+
+mutate(mydata.FP, SpeciesTreeLabela = factor(SpeciesTreeLabel, levels = unique(SpeciesTreeLabel))) %>%
+ggplot() + 
+  geom_point(mapping= aes(color = FootPosture, x = SpeciesTreeLabel, y = avgAngle)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), text = element_text(size= 25), legend.text = element_text(size = 20)) + 
+  scale_x_discrete(expand = c(.01,.05)) + 
+  labs(y = "Mean Angle (degrees)", x = "Species", title = "Mean Angle by Species Separated by Foot Posture", caption = "Average bending angle for each foot posture shown as line in respective colors.") + 
+  scale_color_manual(values=c("royalblue4", "brown1", "orchid2"),
+  labels=c("Digitigrade", "Plantigrade", "Unguligrade")) + 
+  geom_hline(yintercept = DigAngleRatio[1,1], linetype = 'solid', color = 'royalblue4') + 
+  geom_hline(yintercept = PlantAngleRatio[1,1], linetype = 'solid', color = 'brown1') + 
+  geom_hline(yintercept = UngAngleRatio[1,1], linetype = 'solid', color = 'orchid2') 
+
+
+
+```
+
+```{r}
+mutate(mydata.FP, SpeciesTreeLabel = factor(SpeciesTreeLabel, levels = unique(SpeciesTreeLabel))) %>%
+ggplot() + 
+  geom_point(mapping= aes(color = FootPosture2Dig, x = SpeciesTreeLabel, y = avgRatio)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), text = element_text(size= 25), legend.text = element_text(size = 20)) + 
+  scale_x_discrete(expand = c(.01,.05)) + 
+  labs(y = "Mean Ratio", x = "Species") + 
+  scale_color_manual(values=c("royalblue4", "brown1", "orchid2", "seagreen"),
+  labels=c("Digitigrade (bird)", "Digitigrade (other)", "Plantigrade", "Unguligrade")) + 
+  geom_hline(yintercept = DbirdAngleRatio[1,2], linetype = 'solid', color = 'royalblue4') + 
+  geom_hline(yintercept = DotherAngleRatio[1,2], linetype = 'solid', color = 'brown1') + 
+  geom_hline(yintercept = PlantAngleRatio[1,2], linetype = 'solid', color = 'orchid2') + 
+  geom_hline(yintercept = UngAngleRatio[1,2], linetype = 'solid', color = 'seagreen') 
+```
+
+
+```{r plot boxplots of bending angle separated by foot posture, fig.width = 8, fig.height = 4, fig.align = 'center', echo = FALSE}
+
+ggplot(data = mydata.FP, mapping = aes(x = FootPosture, y = avgAngle, fill = FootPosture)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("royalblue4", "brown1", "orchid2"),
+    labels=c("Digitigrade", "Plantigrade", "Unguligrade")) + 
+    labs(x = "Foot posture", y = "Mean Angle (degrees)", fill = 'Foot Posture') 
+```
+
+  * Bending Ratio
+    * The bending ratio is highest for digitigrade animals (slightly higher for birds specifically than other digitigrade animals), indicating a longer distal segment on which to rest the body during bending before propulsion. Ungulates exhibit the lowest average bending ratio, indicating a very short distal region (the hoof) compared with the length of the whole propulsor. 
+```{r plot mean ratio by species, color by foot posture, fig.width=30, fig.align = 'center', fig.asp = .5, fig.align = 'center', echo = FALSE}
+mutate(mydata.FP, SpeciesTreeLabel = factor(SpeciesTreeLabel, levels = unique(SpeciesTreeLabel))) %>%
+ggplot() + 
+  geom_point(mapping= aes(color = FootPosture2Dig, x = SpeciesTreeLabel, y = avgRatio)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), text = element_text(size= 25), legend.text = element_text(size = 20)) + 
+  scale_x_discrete(expand = c(.01,.05)) + 
+  labs(y = "Mean Ratio", x = "Species") + 
+  scale_color_manual(values=c("royalblue4", "brown1", "orchid2", "seagreen"),
+  labels=c("Digitigrade (bird)", "Digitigrade (other)", "Plantigrade", "Unguligrade")) + 
+  geom_hline(yintercept = DbirdAngleRatio[1,2], linetype = 'solid', color = 'royalblue4') + 
+  geom_hline(yintercept = DotherAngleRatio[1,2], linetype = 'solid', color = 'brown1') + 
+  geom_hline(yintercept = PlantAngleRatio[1,2], linetype = 'solid', color = 'orchid2') + 
+  geom_hline(yintercept = UngAngleRatio[1,2], linetype = 'solid', color = 'seagreen') 
+```
+
+
+```{r plot boxplots of bending ratio separated by foot posture, fig.width = 8, fig.height = 4, fig.align = 'center', echo = FALSE}
+
+ggplot(data = mydata.FP, mapping = aes(x = FootPosture, y = avgRatio, fill = FootPosture)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("royalblue4", "brown1", "orchid2"), labels=c("Digitigrade", "Plantigrade", "Unguligrade")) + 
+    labs(x = "Foot posture", y = "Mean Ratio", fill = "Foot Posture") 
+```
+
+
+
+* Morphospace of Bending Angle vs. Bending Ratio Separated by Class
+  * There is a very high degree of overlap between Mammalia and Aves (mammals and birds) in the morphospace that they occupy, indicating that a relatively wide range of angles and ratios are exhibited by both classes. 
+```{r plot mean ratio by mean angle with convex polygons colored by class, fig.width=10, fig.height=8, fig.align = 'center', echo = FALSE}
+X <- mydata.FP[mydata.FP$Class == "Mammalia", c(6,7)]
+plot(X, col = 'red', main = "Morphospace of Mean Bending Angle and Ratio by Class", xlab = 'Average Bending Angle', ylab = 'Average Bending Ratio')
+hpts <- chull(X)
+hpts <- c(hpts, hpts[1])
+lines(X[hpts, ], col = 'red')
+Y <- mydata.FP[mydata.FP$Class == "Aves", c(6,7)]
+hptsY <- chull(Y)
+hptsY <- c(hptsY, hptsY[1])
+points(Y, col = 'blue')
+lines(Y[hptsY, ], col = 'blue')
+legend("bottomright", legend = c("Mammals", "Birds"), col = c('red','blue'), pch = c(19, 19), inset = c(0.1, 0.1))
+
+```
+
+```{r ANOVA for class morphospace}
+class.ang.ANOVA <- aov(avgAngle ~ Class, data = mydata.FP)
+summary(class.ang.ANOVA)
+
+class.rat.ANOVA <- aov(avgRatio ~ Class, data = mydata.FP)
+summary(class.rat.ANOVA)
+
+# Multiple pairwise comparison
+TukeyHSD(class.ang.ANOVA)
+TukeyHSD(class.rat.ANOVA)
+
+# Check homogeneity of variance with plot and with Levene's test
+plot(class.ang.ANOVA, 1) # there are a few outliers
+plot(class.rat.ANOVA, 1) # there are a few outliers
+
+
+```
+
+
+
+* Morphospace of Bending Angle vs. Bending Ratio Separated by Foot Posture
+  * There is again a relatively high degree of overlap between foot posture groups seen in the morphospace. Ungulates take up a smaller portion of the morphospace compared to other groups, exhibiting higher bending angles and lower bending ratios. 
+```{r plot mean ratio by mean angle with convex polygons colored by foot posture, fig.width=10, fig.height=8, fig.align = 'center', echo = FALSE}
+X <- mydata.FP[mydata.FP$FootPosture == "Plantigrade", c(6,7)]
+plot(X, col = 'orchid2', main = "Morphospace of Mean Bending Angle and Ratio by Foot Posture", xlab = 'Average Bending Angle', ylab = 'Average Bending Ratio', xlim = c(50, 160), ylim = c(0, 1.0))
+hpts <- chull(X)
+hpts <- c(hpts, hpts[1])
+lines(X[hpts, ], col = 'brown1')
+Y <- mydata.FP[mydata.FP$FootPosture == "Unguligrade", c(6,7)]
+hptsY <- chull(Y)
+hptsY <- c(hptsY, hptsY[1])
+points(Y, col = 'orchid2')
+lines(Y[hptsY, ], col = 'orchid2')
+Z <- mydata.FP[mydata.FP$FootPosture == "Digitigrade", c(6,7)]
+hptsZ <- chull(Z)
+hptsZ <- c(hptsZ, hptsZ[1])
+points(Z, col = 'royalblue4')
+lines(Z[hptsZ, ], col = 'royalblue4') 
+legend("topleft", legend=c("Plantigrade", "Unguligrade", "Digitigrade"),
+       col=c("orchid2", "seagreen", "royalblue4"), lty = 1)
+```
+
+* Pruned mammalian phylogenetic tree with foot posture
+```{r phylogenetic tree data reading in and output nexus, echo = FALSE, warning = FALSE, results = 'hide', fig.width = 16, fig.height = 15, fig.align = 'center'}
+# Read in species name, unite species names to Genus_species format
+traitCols <- c(1:4)
+species_names_FFP <- species %>%
+  separate(SpeciesName, into = c("Genus", "Species"), sep = ' ') %>% 
+  unite(SpeciesTreeLabel, Genus, Species, sep = "_")  #ignored row 101? check later
+# Remove duplicate names from list
+dat <- as.data.frame(species_names_FFP, stringsAsFactors = FALSE)
+str(dat)
+duplicates <- as.numeric(rownames(dat[duplicated(dat[,1]),]))
+trimmed.dat <- dat[-duplicates,]
+write.csv(trimmed.dat, file = "trimmed.dat.csv")
+row.names(trimmed.dat) <- trimmed.dat[,1]
+# Plot mammal tree
+mammalTree
+plotTree(mammalTree, cex = 0.6, fsize = 1.5,lwd=2,ftype="i")
+
+
+
+```
+
+* Pruned avian phylogenetic tree
+```{r repeat for bird tree, echo = FALSE, warning = FALSE, results = 'hide', fig.width = 16, fig.height = 10, fig.align = 'center'}
+# Plot bird tree
+birdTree
+plotTree(birdTree, cex = 0.6, fsize=2, lwd=1, ftype="i")
+```
+
+* Stochastic mapping of foot posture onto mammalian phylogenetic tree
+  * Stochastic mapping of foot posture onto fan tree shows multiple origins of plantigrady and digitigrady but not for unguligrady, which has a single origin (note: exception of elephant which does not fit into one foot posture category with consensus in scientific community). 
+```{r fig.width = 10, fig.height = 10, warning = FALSE, message = FALSE, results = 'hide', fig.align = 'center', echo = FALSE}
+mydata.FP.a <- mutate(mydata.FP, SpeciesTreeLabel = factor(SpeciesTreeLabel, levels = unique(SpeciesTreeLabel))) 
+write_csv(mydata.FP.a[, c(1, 5:7)], file.path("C:/Users/brook/Documents/R/FFP/matrixFPmammal.csv"))
+matrixFPmammal <- as.matrix(read.csv("matrixFPmammal.csv", row.names=1))[,1]
+stochasticMammal <- make.simmap(mammalTree, matrixFPmammal, model = "SYM", nsim = 1)
+cols <- setNames(c("royalblue4","brown1","orchid1", "seagreen"), c("Dbird", "Dother", "Plantigrade", "Unguligrade"))
+plotSimmap(stochasticMammal, cols,type="fan", fsize=0.8, ftype="i")
+
+```
+
+* Testing for phylogenetic signal
+```{r phylogenetic signal calculations, warning = FALSE, echo = FALSE, results = 'hide', fig.align = 'center'}
+# add PCs to columns
+traitCols <- c(2,3)
+result.pca.mam <- prcomp(data.prunedMamTree[,traitCols])
+result.pca.bird <- prcomp(data.prunedBirdTree[,traitCols])
+summary(result.pca.mam)
+summary(result.pca.bird)
+
+data.prunedMamTree$PC1 <- result.pca.mam$x[,1]
+data.prunedMamTree$PC2 <- result.pca.mam$x[,2]
+data.prunedBirdTree$PC1 <- result.pca.bird$x[,1]
+data.prunedBirdTree$PC2 <- result.pca.bird$x[,2]
+
+#update traitCols
+traitColsMam <- 2:length(data.prunedMamTree)
+traitColsBird <- 2:length(data.prunedBirdTree)
+
+#phylo signal calculations
+phySig.perTrait.mam <- c()
+for(trait in traitColsMam){
+  trait.tmp <- data.prunedMamTree[,trait]
+  names(trait.tmp) <- mammalTree$tip.label
+  PHYLOsig.tmp <- phylosig(mammalTree, trait.tmp, method="K", test=TRUE, nsim=1000)
+  phySig.perTrait.mam <- rbind(phySig.perTrait.mam, c(PHYLOsig.tmp$K, PHYLOsig.tmp$P))
+}
+colnames(phySig.perTrait.mam)<-c("K", "p-value")
+row.names(phySig.perTrait.mam)<-colnames(data.prunedMamTree)[traitColsMam]
+
+phySig.perTrait.bird <- c()
+for(trait in traitColsBird){
+  trait.tmp <- data.prunedBirdTree[,trait]
+  names(trait.tmp) <- birdTree$tip.label
+  PHYLOsig.tmp <- phylosig(birdTree, trait.tmp, method="K", test=TRUE, nsim=1000)
+  phySig.perTrait.bird <- rbind(phySig.perTrait.bird, c(PHYLOsig.tmp$K, PHYLOsig.tmp$P))
+}
+colnames(phySig.perTrait.bird)<-c("K", "p-value")
+row.names(phySig.perTrait.bird)<-colnames(data.prunedBirdTree)[traitColsBird]
+```
+  * Phylogenetic signal for mammalian tree
+    * Very low K values (less than 1.0) indicate that there is less phylogenetic signal than would be expected under simple Brownian motion, and therefore that phylogenetic signal is likely not a driver for any trends seen in mean bending angle and mean bending ratio for mammals. Further, the p-value is nonsignificant for both bending metrics, indicating that there is no significant signal. 
+```{r phylogenetic signal table for mammalian tree, fig.align = 'center', echo = FALSE}
+kable(phySig.perTrait.mam[1:2,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+  
+  
+  * Phylogenetic signal for avian tree
+    * Low K values (less than 1.0) indicate that there is less phylogenetic signal than would be expected under simple Brownian motion, and therefore that phylogenetic signal is likely not a driver for any trends seen in mean bending angle and mean bending ratio for birds. Further, the p-value is nonsignificant for both bending metrics, indicating that there is no significant signal. 
+```{r phylogenetic signal table for avian tree, fig.align = 'center', echo = FALSE}
+kable(phySig.perTrait.bird[1:2,]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# 6. Main Conclusions
+Insufficient information exists in the scientific literature to compare the biomechanics of vastly different types of animals using similar measurements of bending. Solving this problem requires the use of simple but novel metrics of bending that are able to be applied to species of different phylogenetic histories, varying foot postures, and more. From my work trying to solve this problem, I conclude that propulsor bending patterns during terrestrial locomotion are constrained by a set of ‘bending rules’ so to speak. These ranges differ by foot posture and are not entirely dependent on phylogenetic relationships, as evidenced by nonsignificant phylogenetic signal. Based on my work, solutions to questions regarding evolutionary history on a macro-scale from mammals to birds can be addressed. This will benefit individuals interested in researching phylogenetic relationships on a large scale and in the future, more animals can be added to the data set to improve the accuracy of our conclusions and to make broader conclusions across even more groups of animals. The implications of understanding the differences in bending metrics between groups of animals could extend beyond a deeper understanding for evolutionary morphology including to the biomimetic design of prosthetics and robotic limbs.
+
+
+# 7. References
+Birch, J. & Dickinson, M. Spanwise flow and the attachment of the leading-edge vortex on insect wings. Nature 412, 729–733 (2001). https://doi.org/10.1038/35089071
+
+Colin S.P., Costello J.H., Dabiri J.O., et al. Biomimetic and live medusae reveal the mechanistic advantages of a flexible bell margin. PLoS One. 2012;7(11):e48909. doi:10.1371/journal.pone.0048909
+
+Lucas, K. N., Johnson, N., Beaulieu, W. T., Cathcart, E., Tirrell, G., Colin, S. P., Gemmell, B. J., Dabiri, J. O. & Costello, J. H. (2014). Bending rules for animal propulsion. Nat. Commun. 5, 3293.
+
+
+
