@@ -1,0 +1,1021 @@
+---
+title: "Bendiness"
+author: "Brooke Quinn"
+date: "3/7/2022"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+    toc_depth: 4
+    number_sections: false
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: scroll !important;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+</style>
+
+
+# Setup
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+## Packages
+
+All packages required to run this .Rmd file load here.
+
+```{r packages.data, message = FALSE}
+require(phytools)
+require(geiger)
+require(ape)
+require(readxl)
+require(picante)
+
+require(dplyr)
+require(tidyverse)
+require(phylosignal)
+require(phylobase)
+require(factoextra)
+require(car)
+require(devtools)
+require(caper)
+require(OUwie)
+require(ouch)
+require(data.table)
+require(bit64)
+
+```
+
+## Working directory
+```{r working.directory}
+orig.wd <- setwd('C:/Users/brook/Documents/R/FFP')
+```
+
+
+# Import data and tree
+```{r using 100 trees downloaded from vertlife mammals birth-date node-dated DNA only trees (4098 species from set of 10k trees)}
+# import, trim, and clean up main data file for species and traits (bending area and ratio)
+species <- read_excel("species_names_FFP.xlsx")
+traitCols <- c(1:4)
+species_names_FFP <- species[, traitCols] %>%
+  separate(SpeciesName, into = c("Genus", "Species"), sep = ' ') %>% 
+  unite(SpeciesTreeLabel, Genus, Species, sep = "_")  #ignored row 101? check later
+dat <- as.data.frame(species_names_FFP, stringsAsFactors = FALSE)
+str(dat)
+duplicates <- as.numeric(rownames(dat[duplicated(dat[,1]),]))
+trimmed.dat <- dat[-duplicates,]
+dim(trimmed.dat)
+head(trimmed.dat)
+write.csv(trimmed.dat, file = "trimmed.dat.csv")
+row.names(trimmed.dat) <- trimmed.dat[,1]
+
+# separate mammal & bird trees
+# I'm using 100 trees downloaded from vertlife mammals birth-date node-dated DNA only trees (4098 species from set of 10k trees)
+mammalsFull <- trimmed.dat[trimmed.dat$Class == "Mammalia", ]
+allMamTrees <- read.nexus("100mamtrees.nex")
+phyMamTrees <- list()
+for(i in c(1:100)){
+  phyMamTrees[[i]] <- treedata(allMamTrees[[i]], mammalsFull, sort = TRUE)$phy
+  #drop.tip(phyMamTrees[[i]]$phy, c('Echinops_telfairi'))
+}
+
+#  The following tips were not found in 'phy' and were dropped from 'data':
+	#Aptenodytes_patagonicus
+	#Equus_asinus
+	#Equus_burchellii
+	#Rhizomys_sinensis
+	#Smutsia_gigantea
+	#Sus_scrofa
+
+mammals <- mammalsFull[-c(44, 58, 61, 9, 30, 37),] # removing mammals from data frame that weren't found in phylogeny tip set
+
+birds <- trimmed.dat[trimmed.dat$Class == "Aves", ]
+allBirdTrees <- read.nexus("100birdtrees.nex")
+phyBirdTrees <- list()
+for(i in c(1:100)){
+  phyBirdTrees[[i]] <- treedata(allBirdTrees[[i]], birds, sort = TRUE)$phy
+}
+
+# The following tips were not found in 'phy' and were dropped from 'data':
+# 	Antigone_canadensis
+#  	Aramides_albiventris
+
+	
+```
+
+# Load and tidy foot flexibility data
+```{r}
+mydata <- read.csv("C:/Users/brook/Documents/Hsieh Lab/Flexible Feet Project/FFPdata_9.28.20.csv", header = TRUE, skipNul = TRUE, check.names = F)
+
+# Create tables of means for each species
+# Aggregate data by species tree label and find means
+traitCols <- c(2,5,10)
+mydata.1 <- mydata[, traitCols] %>%
+  separate(SpeciesName, into = c("Genus", "Species"), sep = ' ') %>% 
+  unite(SpeciesTreeLabel, Genus, Species, sep = "_")  #ignored rows 53, 79, 102: check this later! Not sure why 
+  
+for(trait in traitCols){
+  newmeans <- aggregate(mydata.1[,2:3], list(mydata.1$SpeciesTreeLabel), FUN=mean)
+}
+colnames(newmeans)[1] <- "SpeciesTreeLabel"
+
+for(trait in traitCols){
+  newSD <- aggregate(mydata.1[,2:3], list(mydata.1$SpeciesTreeLabel), FUN = sd)
+}
+colnames(newSD)[1] <- 'SpeciesTreeLabel'
+
+write.table(newmeans,file="SpeciesMeanTraitValues.txt",col.names=NA,sep="\t")
+
+data.prunedMamTree <- newmeans[(newmeans$SpeciesTreeLabel%in%phyMamTrees[[1]]$tip.label),]
+rownames(data.prunedMamTree) <- data.prunedMamTree$SpeciesTreeLabel
+
+data.prunedBirdTree <- newmeans[(newmeans$SpeciesTreeLabel%in%phyBirdTrees[[1]]$tip.label),]
+rownames(data.prunedBirdTree) <- data.prunedBirdTree$SpeciesTreeLabel
+
+```
+
+
+```{r subsets of data}
+mydata.1 <- mydata %>%
+  separate(SpeciesName, into = c("Genus", "Species"), sep = ' ') %>% 
+  unite(SpeciesTreeLabel, Genus, Species, sep = "_")  #ignored rows 53, 79, 102: check this later! Not sure why 
+
+
+# Subset of data set including 3 foot postures
+traitCols2 <- c(2,5,10,17:20)
+mydata.1[,traitCols2] %>% 
+  group_by(SpeciesTreeLabel) %>%
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  summarize(avgAngle = mean(MeanAngle), avgRatio = mean(MeanRatio)) %>%
+  group_by(SpeciesTreeLabel) -> mydata.2
+
+mydata.1[,c(2,17:20)] %>%
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  full_join(mydata.2, mydata.1, by = "SpeciesTreeLabel") %>%
+  arrange(FootPosture2Dig) -> mydata.3
+
+mydata.FP <- mydata.3[-32,] #removing the second Canis_lupus which appears for some reason
+
+mammalTipVect <- list()
+for(i in c(1:100)){
+  as.vector(mydata.FP[, c(1,4)]) %>%
+  inner_join(data.prunedMamTree) -> mammalTipVect[[i]]
+}
+
+birdTipVect <- list()
+for(i in c(1:100)){
+  as.vector(mydata.FP[, c(1,4)]) %>%
+  inner_join(data.prunedBirdTree) -> birdTipVect[[i]]
+}
+
+# subset including just variables for regressions
+traitCols <- c(2,5,10,13:15,17:20)
+
+mydata.1[,traitCols] %>% 
+  group_by(SpeciesTreeLabel) %>%
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  summarize(avgAngle = mean(MeanAngle), avgRatio = mean(MeanRatio)) %>%
+  group_by(SpeciesTreeLabel) -> mydata.2
+
+mydata.1[,traitCols] %>%
+  unique(incomparables = FALSE, fromLast = FALSE) %>%
+  full_join(mydata.2, mydata.1, by = "SpeciesTreeLabel") %>%
+  arrange(FootPosture) -> mydata.reg
+
+mydata.reg.mammals <- filter(mydata.reg, Class == 'Mammalia')
+# 9-17-20 need to summarize data to means and include gait and other variables for regression section below
+
+mydata.reg.birds <- filter(mydata.reg, Class == 'Aves')
+
+```
+
+
+```{r ANOVA}
+# One way ANOVA
+FPang.aov <- aov(avgAngle ~ FootPosture, data = mydata.FP)
+summary(FPang.aov)
+
+FPrat.aov <- aov(avgRatio ~ FootPosture, data = mydata.FP)
+summary(FPrat.aov)
+
+# Multiple pairwise comparison
+TukeyHSD(FPang.aov)
+TukeyHSD(FPrat.aov)
+
+# Check homogeneity of variance with plot and with Levene's test
+plot(FPang.aov, 1) # there are a few outliers
+plot(FPrat.aov, 1) # there are a few outliers
+
+leveneTest(avgAngle ~ FootPosture, data = mydata.FP) #p value greater than .05 suggests no evidence to believe that there are statistically significant differences in variance between groups, so we can assume homogeneity of variances
+leveneTest(avgRatio ~ FootPosture, data = mydata.FP) # p value less than .05 suggests that there are statistically significant differences between groups, so we might not be able to assume homogeneity of variances. For this case, we could try using the pairwise t test without assumption of homogeneity of variances
+pairTtest.ang <- pairwise.t.test(mydata.FP$avgAngle, mydata.FP$FootPosture, p.adjust.method = "BH", pool.sd = FALSE) # using this test, we see significant differences between all groups 
+pairTtest.rat <- pairwise.t.test(mydata.FP$avgRatio, mydata.FP$FootPosture, p.adjust.method = "BH", pool.sd = FALSE) # using this test, we see significant differences between all groups except digitigrade to plantigrade ratio
+  
+
+
+```
+
+```{r regressions}
+# Simple linear regression of bending angle vs bending ratio
+linearReg <- lm(avgAngle ~ avgRatio, data = mydata.FP)
+summary(linearReg)
+
+# Linear regression of gait vs bending metrics
+
+# with hopping grouped with running with all animals
+data.hopToRun <- mydata.reg %>% 
+  mutate(GaitSimple = ifelse(Gait == 'Hop', 'Run', Gait))
+data.hopToRun.mam <- mydata.reg.mammals %>% 
+  mutate(GaitSimple = ifelse(Gait == 'Hop', 'Run', Gait))
+na.omit(data.hopToRun)
+na.omit(data.hopToRun.mam)
+gait.BA.hopToRun <- lm(MeanAngle ~ GaitSimple, data = data.hopToRun)
+gait.BR.hopToRun <- lm(MeanRatio ~ GaitSimple, data = data.hopToRun)
+summary(gait.BA.hopToRun) # not significant for angle
+summary(gait.BR.hopToRun) # significant for ratio
+ggplot(na.omit(data.hopToRun), mapping = aes(x = GaitSimple, y = MeanAngle, fill = GaitSimple)) + 
+  geom_boxplot()
+ggplot(na.omit(data.hopToRun), mapping = aes(x = GaitSimple, y = MeanRatio, fill = GaitSimple)) + 
+  geom_boxplot()
+
+# with just mammals for BR
+gait.BR.hopToRun.mam <- lm(MeanRatio ~ GaitSimple, data = data.hopToRun.mam)
+summary(gait.BR.hopToRun.mam) # significant for ratio
+ggplot(na.omit(data.hopToRun.mam), mapping = aes(x = GaitSimple, y = MeanRatio, fill = GaitSimple)) + 
+  geom_boxplot() # still significant for ratio --> difference is due to trot group, walk and run look basically identical
+
+# with hopping not grouped with running
+gait.BA <- lm(MeanAngle ~ Gait, data = mydata.reg.mammals)
+summary(gait.BA)
+
+# 9-28-20 fill out three empty gaits in original datasheet (giraffe, capra hircus two)
+
+  # need to fill out empty gaits for birds before this means anything. For now, looking at just mammals shows sig difference due entirely to hopping gait. Might need to remove, or reclassify hopping as running and see results. Placing hopping into the running category still leaves significant differences between run, trot, and walk. What is trotting closer to?
+
+
+
+```
+
+
+```{r phylogenetic ANOVA using phylANOVA}
+
+# Phylogenetic ANOVA
+# Bending angle
+phyanova.BA <- list()
+z <- list()
+x <- list()
+for(i in c(1:100)){
+  mammalTreeTips <- as.data.frame(phyMamTrees[[i]]$tip.label)
+  rownames(mammalTreeTips) <- mammalTreeTips[,1]
+  rownames(mammalTipVect[[i]]) <- mammalTipVect[[i]][,1]
+  z[[i]] <- cbind(mammalTreeTips, mammalTipVect[[i]][, 'MeanAngle'][match(rownames(mammalTreeTips), rownames(mammalTipVect[[i]]))])
+  colnames(z[[i]]) <- c('SpeciesTreeLabel', 'avgAngle')
+  x[[i]] <- cbind(z[[i]], mammalTipVect[[i]][, 'FootPosture'][match(rownames(mammalTreeTips), rownames(mammalTipVect[[i]]))])
+  colnames(x[[i]]) <- c('SpeciesTreeLabel', 'avgAngle', 'FootPosture')
+  phyanova.BA[[i]] <- phylANOVA(phyMamTrees[[i]], x[[i]][, 3], x[[i]][, 2], nsim = 10, posthoc = TRUE) # current results indicate no significant difference between groups when phylogeny is considered
+}
+# Calculate average of Pf across list
+avgBAphyANOVA <- data.frame(Pf=NA)
+for(i in c(1:100)){
+  avgBAphyANOVA[[i]] <- phyanova.BA[[i]]$Pf
+}
+sum.anova.BA <- sum(avgBAphyANOVA)
+avg.phyanova.BA <- sum.anova.BA/100 # this is the average p value of a phylogenetic anova for bending angle for all 100 trees
+
+# Bending ratio
+phyanova.BR <- list()
+mammalTipVect1 <- mammalTipVect 
+z1 <- list()
+x1 <- list()
+for(i in c(1:100)){
+  mammalTreeTips1 <- as.data.frame(phyMamTrees[[i]]$tip.label)
+  rownames(mammalTreeTips1) <- mammalTreeTips1[,1]
+  rownames(mammalTipVect1[[i]]) <- mammalTipVect1[[i]][,1]
+  z1[[i]] <- cbind(mammalTreeTips1, mammalTipVect1[[i]][, 'MeanRatio'][match(rownames(mammalTreeTips1), rownames(mammalTipVect1[[i]]))])
+  colnames(z1[[i]]) <- c('SpeciesTreeLabel', 'avgAngle')
+  x1[[i]] <- cbind(z1[[i]], mammalTipVect1[[i]][, 'FootPosture'][match(rownames(mammalTreeTips1), rownames(mammalTipVect1[[i]]))])
+  colnames(x1[[i]]) <- c('SpeciesTreeLabel', 'avgRatio', 'FootPosture')
+  phyanova.BR[[i]] <- phylANOVA(phyMamTrees[[i]], x1[[i]][, 3], x1[[i]][, 2], nsim = 10, posthoc = TRUE) # current results indicate no significant difference between groups when phylogeny is considered
+}
+# Calculate average of Pf across list
+avgBRphyANOVA <- data.frame(Pf=NA)
+for(i in c(1:100)){
+  avgBRphyANOVA[[i]] <- phyanova.BR[[i]]$Pf
+}
+sum.anova.BR <- sum(avgBRphyANOVA)
+avg.phyanova.BR <- sum.anova.BR/100 # this is the average p value of a phylogenetic anova for bending angle for all 100 trees
+
+```
+
+
+```{r PGLS}
+# Trying PGLS using ape and gls function
+mydata.PGLS <- mydata.FP[, c(1,3,4,6,7)] %>%
+  filter(Class == 'Mammalia') %>%
+  dplyr::select(SpeciesTreeLabel, FootPosture, avgAngle, avgRatio)
+rownames(mydata.PGLS) <- mydata.PGLS[,1]
+
+
+# dropping these species that weren't recognized when creating mam trees from pgls data set
+	#Aptenodytes_patagonicus
+	#Equus_asinus
+	#Equus_burchellii
+	#Rhizomys_sinensis
+	#Smutsia_gigantea
+	#Sus_scrofa
+mydata.PGLS.short <- subset(mydata.PGLS, mydata.PGLS$SpeciesTreeLabel != c("Aptenodytes_patagonicus", "Equus_asinus", "Equus_burchellii", "Rhizomys_sinensis", "Smutsia_gigantea", "Sus_scrofa"))
+
+mydata.PGLS %>% filter(!str_detect(SpeciesTreeLabel, c("Aptenodytes_patagonicus", "Equus_asinus", "Equus_burchellii", "Rhizomys_sumatrensis", "Smutsia_gigantea", "Sus_scrofa"))) -> mydata.PGLS.short
+
+bmPGLS <- corBrownian(1, allMamTrees[[1]])
+name.check(mydata.PGLS.short, allMamTrees[[1]])
+bmPGLS.model <- gls(avgAngle ~ FootPosture, data = mydata.PGLS.short, correlation = bmPGLS, method = "ML") # specify the "ML" method
+summary(pglsModel)
+
+#Error in Initialize.corPhyl(X[[i]], ...) : 
+#  number of observations and number of tips in the tree are not equal.
+
+# Bending angle
+model.BA.1 <- list()
+anova.model.BA.1 <- list()
+for(i in c(1:50)){
+  name.check(phyMamTrees[[i]], x[[i]])
+  compData <- comparative.data(phyMamTrees[[i]], x[[i]], SpeciesTreeLabel, vcv=TRUE, vcv.dim=3, na.omit = TRUE)
+  model.BA.1[[i]] <- pgls(avgAngle ~ FootPosture, compData, lambda='ML')
+  anova.model.BA.1[[i]] <- anova(model.BA.1[[i]]) # can probably remove this line, just need pgls function, and throw model into a list. Then summarize results later out of loop. 
+}
+
+#with pgls loop, need to check if I have to run comparative data function or tree data function first in separate loop. Prob comp data because generatng variance covariance matrix. 
+
+# help 8-13-20:
+# pgls function can't handle 1:100 at once I think, gives error 'Problem with optim:52ERROR: ABNORMAL_TERMINATION_IN_LNSRCH'
+# That's not actually the issue b/c I still get the error when separating. Revell answer from 7 years ago says "pgls is in the package 'caper' not 'geiger'. You can fit the same models using gls in the nlme package using correlation structures from ape. It's possible that this implementation might better protect you against regions of the likelihood space that are not defined. (Without a specific example, though, this is hard to assess.)"
+# 10-8-20 got some output at least finally but confusing - need to take a closer look at all pgls stuff again (if we want to include it at all)
+
+model.BA.2 <- list()
+anova.model.BA.2 <- list()
+
+for(i in c(51:99)){
+  name.check(phyMamTrees[[i]], x[[i]])
+  compData <- comparative.data(phyMamTrees[[i]], x[[i]], SpeciesTreeLabel, vcv=TRUE, vcv.dim=3, na.omit = TRUE)
+  model.BA[[i]] <- gls(avgAngle ~ FootPosture, compData, lambda='ML')
+  anova.model.BA <- anova(model)
+}
+
+pglsModel1 <- gls(avgAngle ~ FootPosture, correlation = corBrownian(phy = phyMamTrees[[1]]), data = x, method = "ML")
+anova(pglsModel1)
+coef(pglsModel1)
+summary(pglsModel1)
+
+tempTree <- mammalTree
+tempTree$edge.length <- tempTree$edge.length * 100
+pglsModelOU <- gls(avgAngle ~ FootPosture, correlation = corMartins(1, phy = tempTree,
+    fixed = FALSE), data = y, method = "ML")
+summary(pglsModelOU)
+anova(pglsModelOU)
+
+#Bending ratio
+modela <- pgls(avgRatio ~ FootPosture, compData, lambda='ML')
+anova(modela)
+
+pglsModel2 <- gls(avgRatio ~ FootPosture, correlation = corBrownian(phy = mammalTree),
+    data = y, method = "ML")
+anova(pglsModel2)
+coef(pglsModel1)
+summary(pglsModel2)
+
+tempTree <- mammalTree
+tempTree$edge.length <- tempTree$edge.length * 100
+pglsModelOU2 <- gls(avgRatio ~ FootPosture, correlation = corMartins(1, phy = tempTree,
+    fixed = FALSE), data = y, method = "ML")
+summary(pglsModelOU2)
+anova(pglsModelOU2)
+
+
+```
+
+
+# Mapping foot posture
+```{r Map foot posture onto tree for mammalia and combined tree}
+new.wd <- setwd("C:/Users/brook/Documents/R/FFP/FPmapping")
+mamMatrix <- as.matrix(read.csv("mammalFPtree.csv",row.names=1))[,1]
+for(i in c(1:100)){
+  pdf(file = paste0(i, "mapFP.pdf"), width = 10, height = 10) 
+  dotTree(phyMamTrees[[i]], mamMatrix, length = 3, legend = TRUE)
+  dev.off()
+}
+
+
+setwd(orig.wd)
+```
+
+# Stochastic mapping of foot posture
+```{r stochastic mapping for mammalia tree}
+new.wd <- setwd("C:/Users/brook/Documents/R/FFP/FPmapping")
+
+stochasticMammal <- make.simmap(allMamTrees, mamMatrix, model = "SYM", nsim = 1) # reduce this to 1 per tree, so make nsim = 1, can check first to see if there is significant variation between simmap trees first
+cols <- setNames(c("black","red","green"), c("Digitigrade", "Plantigrade", "Unguligrade"))
+pdf(file = "stochasticMammal.pdf", width = 10, height = 10)
+plotSimmap(stochasticMammal, cols, type="fan", fsize=0.8, ftype="i", offset = 2, hold = FALSE)
+dev.off() 
+
+saveRDS(stochasticMammal, file = "stochasticMammal.rds")
+
+write.simmap(stochasticMammal, file = "stoMam.simmap.nexus", format = "nexus", version = 1.5)
+
+name.check(allMamTrees[[5]], data.prunedMamTree)
+phylomorphospace(allMamTrees[[5]], data.prunedMamTree[, c(1:2)]) # throws error 'Error in ace(x, a, method = "pic") : NA/NaN/Inf in foreign function call (arg 5)
+# need to select two columns of continuous traits from data matrix. Row names of species names, 2 columns of continuous data. Can also check if i have any NA values, it won't work if so. 
+
+```
+
+# Testing for phylogenetic signal
+```{r phylogenetic signal for separate mammal and bird trees}
+# add PCs to columns
+traitCols <- c(2,3)
+result.pca.mam <- prcomp(data.prunedMamTree[,traitCols]) 
+result.pca.bird <- prcomp(data.prunedBirdTree[,traitCols]) 
+
+data.prunedMamTree$PC1 <- result.pca.mam$x[,1]
+data.prunedMamTree$PC2 <- result.pca.mam$x[,2]
+data.prunedBirdTree$PC1 <- result.pca.bird$x[,1]
+data.prunedBirdTree$PC2 <- result.pca.bird$x[,2]
+
+#update traitCols
+traitColsMam <- 2:length(data.prunedMamTree)
+traitColsBird <- 2:length(data.prunedBirdTree)
+
+#phylo signal calculations
+trait.BA <- data.prunedMamTree[,2]
+trait.BR <- data.prunedMamTree[,3]
+trait.BA.bird <- data.prunedBirdTree[,2]
+trait.BR.bird <- data.prunedBirdTree[,3]
+PHYLOsig.BA <- list()
+PHYLOsig.BR <- list()
+PHYLOsig.BA.bird <- list()
+PHYLOsig.BR.bird <- list()
+PHYsig.mam.BA <- list()
+PHYsig.mam.BR <- list()
+PHYsig.bird.BA <- list()
+PHYsig.bird.BR <- list()
+phy.file.BA <- list()
+phy.file.BR <- list()
+phy.file.BA.bird <- list()
+phy.file.BR.bird <- list()
+for(i in c(1:100)){
+  names(trait.BA) <- phyMamTrees[[i]]$tip.label
+  PHYLOsig.BA [[i]] <- phylosig(phyMamTrees[[i]], trait.BA, method = "K", test = TRUE, nsim = 100)
+}
+
+for(i in c(1:100)){
+  names(trait.BR) <- phyMamTrees[[i]]$tip.label
+  PHYLOsig.BR [[i]] <- phylosig(phyMamTrees[[i]], trait.BR, method = "K", test = TRUE, nsim = 100)
+}
+
+for(i in c(1:100)){
+  names(trait.BA.bird) <- phyBirdTrees[[i]]$tip.label
+  PHYLOsig.BA.bird [[i]] <- phylosig(phyBirdTrees[[i]], trait.BA.bird, method = "K", test = TRUE, nsim = 100)
+}
+
+for(i in c(1:100)){
+  names(trait.BR.bird) <- phyBirdTrees[[i]]$tip.label
+  PHYLOsig.BR.bird [[i]] <- phylosig(phyBirdTrees[[i]], trait.BR.bird, method = "K", test = TRUE, nsim = 100)
+}
+
+# Calculate average of P across list for BA
+PHYLOsig.avgBA.mam <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsig.avgBA.mam[[i]] <- PHYLOsig.BA[[i]]$P
+}
+sum.physig.BA.mam <- sum(PHYLOsig.avgBA.mam)
+avg.physig.BA <- sum.physig.BA.mam/100 # this is the average p value of phylogenetic signal for bending angle for all 100 mammal trees
+
+PHYLOsig.avgBA.bird <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsig.avgBA.bird[[i]] <- PHYLOsig.BA.bird[[i]]$P
+}
+sum.physig.BA.bird <- sum(PHYLOsig.avgBA.bird)
+avg.physig.BA.bird <- sum.physig.BA.bird/100 # this is the average p value of phylogenetic signal for bending angle for all 100 bird trees
+
+# Calculate average of K across list for BA
+PHYLOsigBA.mam.K <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsigBA.mam.K[[i]] <- PHYLOsig.BA[[i]]$K
+}
+sum.physigBA.mam.K <- sum(PHYLOsigBA.mam.K)
+avg.physigBA.mam.K <- sum.physigBA.mam.K/100 # this is the average p value of phylogenetic signal for bending ratio for all 100 mammal trees
+
+PHYLOsigBA.bird.K <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsigBA.bird.K[[i]] <- PHYLOsig.BA.bird[[i]]$K
+}
+sum.physigBA.bird.K <- sum(PHYLOsigBA.bird.K)
+avg.physigBA.bird.K <- sum.physigBA.bird.K/100 # this is the average p value of phylogenetic signal for bending angle for all 100 bird trees
+
+# Calculate average of P across list for BR
+PHYLOsig.avgBR <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsig.avgBR[[i]] <- PHYLOsig.BR[[i]]$P
+}
+sum.physig.BR <- sum(PHYLOsig.avgBR)
+avg.physig.BR <- sum.physig.BR/100 # this is the average p value of phylogenetic signal for bending ratio for all 100 mammal trees
+
+PHYLOsig.avgBR.bird <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsig.avgBR.bird[[i]] <- PHYLOsig.BR.bird[[i]]$P
+}
+sum.physig.BR.bird <- sum(PHYLOsig.avgBR.bird)
+avg.physig.BR.bird <- sum.physig.BR.bird/100 # this is the average p value of phylogenetic signal for bending angle for all 100 bird trees
+ 
+# Calculate average of K across list for BR
+PHYLOsigBR.mam.K <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsigBR.mam.K[[i]] <- PHYLOsig.BR[[i]]$K
+}
+sum.physigBR.mam.K <- sum(PHYLOsigBR.mam.K)
+avg.physigBR.mam.K <- sum.physigBR.mam.K/100 # this is the average p value of phylogenetic signal for bending ratio for all 100 mammal trees
+
+PHYLOsigBR.bird.K <- data.frame(P = NA)
+for(i in c(1:100)){
+  PHYLOsigBR.bird.K[[i]] <- PHYLOsig.BR.bird[[i]]$K
+}
+sum.physigBR.bird.K <- sum(PHYLOsigBR.bird.K)
+avg.physigBR.bird.K <- sum.physigBR.bird.K/100 # this is the average p value of phylogenetic signal for bending angle for all 100 bird trees
+
+# Make table of phylogenetic signal results
+phyTable <- matrix(c(avg.physigBA.mam.K, avg.physig.BA, avg.physigBA.bird.K, avg.physig.BA.bird, avg.physigBR.mam.K, avg.physig.BA, avg.physigBR.bird.K, avg.physig.BR.bird),ncol=2,byrow=TRUE)
+colnames(phyTable) <- c("K","P")
+rownames(phyTable) <- c("Bending Angle: Mammals","Bending Angle: Birds", "Bending Ratio: Mammals", "Bending Ratio: Birds")
+phyTable <- as.table(phyTable)
+
+```
+
+```{r plot PCs}
+
+columns <- c(6,7)
+PCAdata <- mydata.FP
+PCA <- prcomp(PCAdata[,columns])
+PCAdata$PC1 <- PCA$x[,1]
+PCAdata$PC2 <- PCA$x[,2]
+summary(PCA)
+
+ggplot(PCAdata) + 
+  geom_point(mapping= aes(color = FootPosture, x = PC1, y = PC2))
+
+# summary of pca shows that PC1 represents .999 of variance and PC2 represents only .00008 of variance. This suggests that we can minimize our dataset to only one dominant principal component to describe our data. There is one cluster with low PC1 and high PC2 values (top left) which turns out to be ungulates. 
+
+```
+
+
+```{r BayesTraits estimate transition rate file set up}
+bayes.wd <- setwd("C:/Users/brook/Documents/R/FFP/bayesInput")
+
+# filter data set to include only foot posture
+mydata.Bayes <- mydata.FP[, c(1,3,4)] %>%
+  filter(Class == 'Mammalia') %>%
+  dplyr::select(SpeciesTreeLabel, FootPosture)
+
+mydata.Bayes <- mutate(mydata.Bayes, FP = case_when(
+  FootPosture == 'Digitigrade' ~ "D",
+  FootPosture == 'Plantigrade' ~ "P",
+  FootPosture == 'Unguligrade' ~ "U",
+  TRUE ~ as.character(FootPosture)
+)) 
+bayestraitsdata <- mydata.Bayes[,c(1,3)]
+write.csv(bayestraitsdata, file = "bayesinput.csv") #then manually delete the first column of numbers that is added upon export and change file type to .txt for use in BayesTraits command prompt
+
+# write .trees file with all mammal trees
+bayesMamTrees <- allMamTrees
+for(i in c(1:100)){
+  bayesMamTrees[[i]] <- drop.tip(allMamTrees[[i]], c('Echinops_telfairi'))
+}
+
+write.nexus(bayesMamTrees, file = 'C:/Users/brook/Documents/R/FFP/bayesInput/bayesMamTrees.trees')
+
+# Output message from bayes warning of 7 missing taxa based on name discrepancies: need to look into / fix as many as possible. Fix by renaming out data set species label to match tree naming taxonomy. 
+# Could not find a matching taxa name for data point SpeciesTreeLabel
+# Could not find a matching taxa name for data point Rhizomys_sumatrensis
+# Could not find a matching taxa name for data point Echinops_telfairi
+# Could not find a matching taxa name for data point Aptenodytes_patagonicus
+# Could not find a matching taxa name for data point Manis_crassicaudata
+# Could not find a matching taxa name for data point Equus_asinus
+# Could not find a matching taxa name for data point Equus_burchellii
+# Could not find a matching taxa name for data point Sus_scrofa
+
+# in command prompt, hit 1 for multistate, 2 for mcmc, and add 
+# Iterations: 1010000 
+# Burn in: 10000 
+# RevJump exp 10 (to "sets all rate priors to an exponential with a mean of 10") (then type run)
+# repeat three times and average results
+setwd(orig.wd)
+```
+
+
+```{r OUwie bending angle}
+
+ouwie.wd <- setwd("C:/Users/brook/Documents/R/FFP/OUwieInput")
+
+# filter data set to include only foot posture and angle
+mydata.OU <- mydata.FP[, c(1,3,4,6)] %>%
+  filter(Class == 'Mammalia') %>%
+  dplyr::select(SpeciesTreeLabel, FootPosture, avgAngle)
+
+mammals <- trimmed.dat[trimmed.dat$Class == "Mammalia", ]
+rownames(mydata.OU) <- mydata.OU[,1]
+treedat.mam <- list()
+treedat.mam.tips <- list()
+temp <- list()
+temp1 <- list()
+
+for(i in c(1:100)){
+  treedat.mam[[i]] <- treedata(phyMamTrees[[i]], mammals, sort = TRUE)
+  treedat.mam.tips[[i]] <- as.data.frame(phyMamTrees[[i]]$tip.label)
+  rownames(treedat.mam.tips[[i]]) <- treedat.mam.tips[[i]][,1]
+  temp[[i]] <- cbind(treedat.mam.tips[[i]], mydata.OU[,'FootPosture'][match(rownames(treedat.mam.tips[[i]]), rownames(mydata.OU))])
+  colnames(temp[[i]]) <- c('SpeciesTreeLabel', 'FootPosture')
+  temp1[[i]] <- cbind(temp[[i]], mydata.OU[, 'avgAngle'][match(rownames(treedat.mam.tips[[i]]), rownames(mydata.OU))])
+  colnames(temp1[[i]]) <- c('SpeciesTreeLabel', 'FootPosture', 'avgAngle')
+  write_csv(temp1[[i]], paste0(i, 'OU.FPdata.BA.csv'))
+} 
+
+mydata.FP[, c(1,3,4,6)] %>%
+  filter(Class == 'Mammalia') %>%
+  dplyr::select(SpeciesTreeLabel, FootPosture, avgAngle) -> OUwieAngle
+
+# use simmap with ancestral state reconstruction using simmap created in earlier section of code for OUwie, and save output
+
+OU.FP.BA <- list()
+AICs <- list()
+bms.BA <- list()
+oum.BA <- list()
+ouma.BA <- list()
+oumv.BA <- list()
+bestfit.BA <- list()
+
+for(i in c(1:100)){ 
+  OU.FP.BA[[i]] <- read.table(paste0(i, 'OU.FPdata.BA.csv'), header = TRUE, sep = ',')
+  bms.BA[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model= 'BMS', simmap.tree = TRUE, root.station = TRUE) 
+  oum.BA[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model= 'OUM', simmap.tree = TRUE, root.station = TRUE)
+  ouma.BA[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model= 'OUMA', simmap.tree = TRUE, root.station = FALSE) 
+  oumv.BA[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model= 'OUMV', simmap.tree = TRUE, root.station = FALSE) 
+  AICs[[i]] <- c(bms.BA[[i]]$AICc, oum.BA[[i]]$AICc, ouma.BA[[i]]$AICc, oumv.BA[[i]]$AICc)
+  names(AICs[[i]]) <- c('bms', 'oum', 'ouma', 'oumv')
+  bestfit.BA[[i]] <- AICs[[i]]-min(AICs[[i]])
+  write.csv(bestfit.BA[[i]], paste0(i, "OUwie_bestfit.BA.csv"))
+}
+options(scipen = 999)
+
+
+# read in OUwie data files but don't write it
+OU.FP.BA <- list()
+for(i in c(1:100)){ 
+  OU.FP.BA[[i]] <- read.table(paste0(i, 'OU.FPdata.BA.csv'), header = TRUE, sep = ',')
+}
+
+# Calculate overall best fit from output
+newpath <- "C:/Users/brook/Documents/R/FFP/OUwieInput"
+BA.bestfit.files <- list.files(path = newpath, pattern = "bestfit.BA.csv")
+df_list.BA <- lapply(BA.bestfit.files, read.csv, stringsAsFactors = FALSE)
+name_vec <- sub(".csv", "", BA.bestfit.files)
+
+# BMS best fit
+df_final.BA.bms <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BA, function(x) x[1, 2]),
+                       stringsAsFactors = FALSE)
+bms.mean.BA <- mean(df_final.BA.bms[,2])
+
+# OUM best fit
+df_final.BA.oum <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BA, function(x) x[2, 2]),
+                       stringsAsFactors = FALSE)
+oum.mean.BA <- mean(df_final.BA.oum[,2])
+
+# OUMA best fit
+df_final.BA.ouma <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BA, function(x) x[3, 2]),
+                       stringsAsFactors = FALSE)
+ouma.mean.BA <- mean(df_final.BA.ouma[,2])
+
+# OUMV best fit
+df_final.BA.oumv <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BA, function(x) x[4, 2]),
+                       stringsAsFactors = FALSE)
+oumv.mean.BA <- mean(df_final.BA.oumv[,2]) 
+
+# Current results show that OUMA model is best out of bms, oum, ouma, and oumv because the difference between the best fit and the min is 0 for the ouma models. There are some really really high outlier values for all models except ouma though. OUMA model allows bending angle to evolve toward different peaks for foot postures at the same rate. 
+
+
+# BM1 model assumes no difference between foot postures and bending metric evolves under brownian motion
+#bm1.BA <-OUwie(ancStateMam, OU.FP.BA, model= 'BM1', simmap.tree = TRUE, root.station = TRUE) 
+
+# OU1 model assumes no difference between foot postures and bending metric is evolving to the same optimum
+#ou1.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'OU1', simmap.tree = TRUE, root.station = TRUE) 
+
+# BMS model allows bending metric to evolve at differing rate based on foot posture
+#BMS.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'BMS', simmap.tree = TRUE, root.station = TRUE) 
+
+# OUM model allows bending metric to evolve toward different peaks, but the pull towards peak and the rates are the same
+#OUM.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'OUM', simmap.tree = TRUE, root.station = TRUE) 
+
+# OUMA model allows bending metric to evolve toward different peaks with pull towards peak being different as well but the rates are the same
+#OUMA.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'OUMA', simmap.tree = TRUE, root.station = FALSE) 
+
+# OUMV model allows bending metric to evolve toward different peaks with different rates, but the pull is the same
+#OUMV.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'OUMV', simmap.tree = TRUE, root.station = FALSE) 
+
+# OUMVA model allows bending metric to evolve toward different peaks with different rates and different pulls (most complex model)
+#OUMVA.BA <- OUwie(ancStateMam, OU.FP.BA, model= 'OUMVA', simmap.tree = TRUE, root.station = FALSE) 
+
+
+
+orig.wd <- setwd('C:/Users/brook/Documents/R/FFP')
+
+
+
+```
+
+
+```{r OUwie bending angle diagnostic code}
+ouwie.wd <- setwd("C:/Users/brook/Documents/R/FFP/OUwieInput")
+
+# Testing best fitting model with diagnostics for ML estimate
+oum.BA.diag <- OUwie(stochasticMammal[[1]], OU.FP.BA[[1]], model = 'OUM', simmap.tree = TRUE, root.station = TRUE, diagn=TRUE, get.root.theta = TRUE, root.age = NULL, scaleHeight = FALSE, shift.point = 0.5, clade = NULL, mserr="none", starting.vals = NULL, check.identify = TRUE, quiet = FALSE, warn = TRUE, opts = list(algorithm = 'NLOPT_LN_SBPLX', maxeval = '1000', ftol_rel = .Machine$double.eps^0.5))
+
+# same but looped now, OUM. BQ: redo this with root station = true, get root theta = false
+oum.BA.diag <- list()
+for (i in c(1:100)){
+  oum.BA.diag[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model = 'OUM', simmap.tree = TRUE, root.station = TRUE, diagn=TRUE, get.root.theta = FALSE, root.age = NULL, scaleHeight = FALSE, shift.point = 0.5, clade = NULL, mserr="none", starting.vals = NULL, check.identify = TRUE, quiet = FALSE, warn = TRUE, opts = list(algorithm = 'NLOPT_LN_SBPLX', maxeval = '1000', ftol_rel = .Machine$double.eps^0.5))
+}
+# Save an object to a file
+saveRDS(oum.BA.diag, file = "oum.BA.diag.rds")
+# Restore the object
+oum_diag <- readRDS(file = "oum.BA.diag.rds")
+
+# same but looped now, OUMA
+ouma.BA.diag <- list()
+for (i in c(1:100)){
+  ouma.BA.diag[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BA[[i]], model = 'OUMA', simmap.tree = TRUE, root.station = FALSE, diagn=TRUE, get.root.theta = TRUE, root.age = NULL, scaleHeight = FALSE, shift.point = 0.5, clade = NULL, mserr="none", starting.vals = NULL, check.identify = TRUE, quiet = FALSE, warn = TRUE, opts = list(algorithm = 'NLOPT_LN_SBPLX', maxeval = '1000', ftol_rel = .Machine$double.eps^0.5))
+}
+# Save an object to a file
+saveRDS(ouma.BA.diag, file = "ouma.BA.diag.rds")
+# Restore the object
+ouma_diag <- readRDS(file = "ouma.BA.diag.rds")
+
+# 10/26/20: code below taken from code Jennifer sent to me in file OUwie.BodyDepth.DS_TN.AllMods_Aquarium.R. Might delete above section because below section runs OUwie diag code as well, so right now it is redundant (though be sure to check that all inputs and arguments are the same before deleting one or the other - I want them to do the same thing, and then add the diag analysis)
+#orig.wd <- setwd('C:/Users/brook/Documents/R/FFP')
+mods<-c("BM1", "BMS", "OU1", "OUM", "OUMV", "OUMA", "OUMVA")
+simmapAPtrees1<-read.simmap(file = "stoMam.simmap.nexus", format = "nexus", version=1.5) 
+ouwie.wd <- setwd("C:/Users/brook/Documents/R/FFP/OUwieInput")
+data<-read.table("1OU.FPdata.BA.txt", header=T)
+results<-list()
+for(i in 1:length(simmapAPtrees1)){  # keep getting error Error in svd(m) : infinite or missing values in 'x'. If i can't figure out error, online suggests instead using slouch to "test the likelihood of having multiple regimes, it is easy to convert for instance the phy$node.label vector that you would use in OUwie, into the "regimes" vector used in mvSLOUCH."
+  print(i)
+  resmat<-matrix(nrow=27, ncol=7) 
+  colnames(resmat)<-c("BM1","BMS", "OU1", "OUM", "OUMV", "OUMA", "OUMVA")
+  row.names(resmat)<-c("loglik", "AICc", "BI_alpha", "BI_alphaSE", "BI_sigma", "BI_sigmaSE", "FC_alpha", "FC_alphaSE", "FC_sigma", "FC_sigmaSE", "OC_alpha", "OC_alphaSE", "OC_sigma", "OC_sigmaSE", "P_alpha", "P_alphaSE", "P_sigma", "P_sigmaSE", "BI_theta", "BI_thetaSE", "FC_theta", "FC_thetaSE", "OC_theta", "OC_thetaSE", "P_theta", "P_thetaSE", "MLStatus")
+    for(j in 3:7){
+    tmpres<-OUwie(simmapAPtrees1[[i]], data, model=mods[j], simmap.tree=TRUE, root.station=TRUE, diag=T) # I think error svd(m): infinite or missing values in 'x' error is from adding get.root.theta argument or from including bms model?
+    ev<-vector()
+    for(k in 1:length(tmpres$eigval)) if(tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1)
+    eval<-vector()
+    if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative"
+    row.names(tmpres$theta)<-colnames(tmpres$solution)
+    tmpres$theta<-tmpres$theta[order(row.names(tmpres$theta)),]
+    tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))]
+    tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+    resmat[,j]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6], tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], tmpres$theta[1,], tmpres$theta[2,], tmpres$theta[3,], tmpres$theta[4,], eval)
+    }
+  for(l in 1:2){ #ouma and oumv models with root station false as opposed to earlier bms and oum with root station true
+    tmpres<-OUwie(simmapAPtrees1[[i]], OU.FP.BA[[i]], model=mods[l], simmap.tree=TRUE, root.station=FALSE, get.root.theta = TRUE, diag=T)
+    ev<-vector()
+    for(k in 1:length(tmpres$eigval)) if(tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1)
+    eval<-vector()
+    if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative"
+    tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))]
+    tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+    resmat[,l]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6], tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], 0, 0, 0, 0, 0, 0, 0, 0, eval)
+    }
+  results[[i]]<-resmat
+  }
+save(results, file="OUwie.BA.diag.results.Rdata")
+write.csv(results, file="OUwie.BA.diag.results.csv")
+AICctable<-matrix(nrow=length(simmapAPtrees1), ncol=ncol(results[[1]]))
+colnames(AICctable)<-colnames(results[[1]])
+for(i in 1:length(simmapAPtrees1))
+  AICctable[i,]<-as.numeric(results[[i]][2,])-as.numeric(min(results[[i]][2,]))
+colMeans(AICctable)
+write.csv(resmat, file="OUwie.BA.diag.resmat.csv")
+write.csv(AICctable, file="OUwie.BA.diag.AICctable.csv")
+AICctable2<-matrix(nrow=length(simmapAPtrees1), ncol=ncol(results[[1]][,1:5]))
+colnames(AICctable2)<-colnames(results[[1]][,1:5])
+for(i in 1:length(simmapAPtrees1)) AICctable2[i,]<-as.numeric(results[[i]][2,1:5])-as.numeric(min(results[[i]][2,1:5]))
+colMeans(AICctable2)
+write.csv(AICctable2, file="OUwie.BA.diag.AICctable2.csv")
+
+orig.wd <- setwd('C:/Users/brook/Documents/R/FFP')
+
+```
+
+
+```{r OUwie bending ratio}
+
+ouwie.wd <- setwd("C:/Users/brook/Documents/R/FFP/OUwieInput")
+
+# filter data set to include only foot posture and ratio
+mydata.OU.rat <- mydata.FP[, c(1,3,4,7)] %>%
+  filter(Class == 'Mammalia') %>%
+  dplyr::select(SpeciesTreeLabel, FootPosture, avgRatio)
+
+rownames(mydata.OU.rat) <- mydata.OU.rat[,1]
+treedat.mam.rat <- list()
+treedat.mam.tips.rat <- list()
+temp.rat <- list()
+temp1.rat <- list()
+
+for(i in c(1:100)){
+  treedat.mam.rat[[i]] <- treedata(phyMamTrees[[i]], mammals, sort = TRUE)
+  treedat.mam.tips.rat[[i]] <- as.data.frame(phyMamTrees[[i]]$tip.label)
+  rownames(treedat.mam.tips.rat[[i]]) <- treedat.mam.tips.rat[[i]][,1]
+  temp.rat[[i]] <- cbind(treedat.mam.tips.rat[[i]], mydata.OU.rat[,'FootPosture'][match(rownames(treedat.mam.tips.rat[[i]]), rownames(mydata.OU.rat))])
+  colnames(temp.rat[[i]]) <- c('SpeciesTreeLabel', 'FootPosture')
+  temp1.rat[[i]] <- cbind(temp.rat[[i]], mydata.OU.rat[, 'avgRatio'][match(rownames(treedat.mam.tips.rat[[i]]), rownames(mydata.OU.rat))])
+  colnames(temp1.rat[[i]]) <- c('SpeciesTreeLabel', 'FootPosture', 'avgRatio')
+  write_csv(temp1.rat[[i]], paste0(i, 'OU.FPdata.BR.csv'))
+} 
+
+# set up OUwie BR empty lists
+OU.FP.BR <- list()
+AICs.BR <- list()
+bms.BR <- list()
+oum.BR <- list()
+ouma.BR <- list()
+oumv.BR <- list()
+bestfit.BR <- list()
+
+# write OUwie output files with best fit values for 4 models
+for(i in c(1:100)){
+  OU.FP.BR[[i]] <- read.table(paste0(i, 'OU.FPdata.BR.csv'), header = TRUE, sep = ',')
+  bms.BR[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BR[[i]], model= 'BMS', simmap.tree = TRUE, root.station = TRUE) 
+  oum.BR[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BR[[i]], model= 'OUM', simmap.tree = TRUE, root.station = TRUE)
+  ouma.BR[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BR[[i]], model= 'OUMA', simmap.tree = TRUE, root.station = FALSE) 
+  oumv.BR[[i]] <- OUwie(stochasticMammal[[i]], OU.FP.BR[[i]], model= 'OUMV', simmap.tree = TRUE, root.station = FALSE) 
+  AICs.BR[[i]] <- c(bms.BR[[i]]$AICc, oum.BR[[i]]$AICc, ouma.BR[[i]]$AICc, oumv.BR[[i]]$AICc)
+  names(AICs.BR[[i]]) <- c('bms', 'oum', 'ouma', 'oumv')
+  bestfit.BR[[i]] <- AICs.BR[[i]]-min(AICs.BR[[i]])
+  write.csv(bestfit.BR[[i]], paste0(i, "OUwie_bestfit.BR.csv"))
+}
+options(scipen = 999)
+
+# Calculate overall best fit from output
+newpath <- "C:/Users/brook/Documents/R/FFP/OUwieInput"
+BR.bestfit.files <- list.files(path = newpath, pattern = "bestfit.BA.csv")
+df_list.BR <- lapply(BR.bestfit.files, read.csv, stringsAsFactors = FALSE)
+name_vec <- sub(".csv", "", BR.bestfit.files)
+
+# BMS best fit
+df_final.BR.bms <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BR, function(x) x[1, 2]),
+                       stringsAsFactors = FALSE)
+bms.mean.BR <- mean(df_final.BR.bms[,2])
+
+# OUM best fit
+df_final.BR.oum <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BR, function(x) x[2, 2]),
+                       stringsAsFactors = FALSE)
+oum.mean.BR <- mean(df_final.BR.oum[,2])
+
+# OUMA best fit
+df_final.BR.ouma <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BR, function(x) x[3, 2]),
+                       stringsAsFactors = FALSE)
+ouma.mean.BR <- mean(df_final.BR.ouma[,2])
+
+# OUMV best fit
+df_final.BR.oumv <- data.frame(File = name_vec,
+                       Value = sapply(df_list.BR, function(x) x[4, 2]),
+                       stringsAsFactors = FALSE)
+oumv.mean.BR <- mean(df_final.BR.oumv[,2]) 
+
+
+# Current results show that OUMA model is best out of bms, oum, ouma, and oumv because the difference between the best fit and the min is 0 for the ouma models. There are some really really high outlier values for all models except ouma though. OUMA model allows bending ratio to evolve toward different peaks for foot postures at the same rate. 
+
+
+# Testing best fitting model with diagnostics for ML estimate (doesn't work still!!! diang = true is the problem always)
+oum.BR.diag <- OUwie(stochasticMammal[[3]], OU.FP.BR[[3]], model = 'OUM', simmap.tree = TRUE, root.station = TRUE, diagn=TRUE, get.root.theta = TRUE, root.age = NULL, scaleHeight = FALSE, shift.point = 0.5, clade = NULL, mserr="none", starting.vals = NULL, check.identify = TRUE, quiet = FALSE, warn = TRUE, opts = list(algorithm = 'NLOPT_LN_SBPLX', maxeval = '1000', ftol_rel = .Machine$double.eps^0.5))
+
+
+orig.wd <- setwd('C:/Users/brook/Documents/R/FFP')
+
+```
+
+
+```{r other potential OUwie code}
+
+### Test hypothesis that foot posture influences bending angle evolution
+footPos <- list()
+footPosRecon <- list()
+footPosStochMam <- list()
+for(i in c(1:10)){
+  colr <- rep('green', length(OU.FP.BA[[i]][,1])) 
+  colr[OU.FP.BA[[i]][,2] == 'Unguligrade'] <- 'purple'
+  colr[OU.FP.BA[[i]][,2] == 'Plantigrade'] <- 'blue'
+  names(colr) <- OU.FP.BA[[i]][,1]
+  colr <- colr[stochasticMammal[[i]]$tip.label] 
+  plot(stochasticMammal[[i]])
+  tiplabels(pch=16, col=colr)
+  
+  footPos[[i]] <- OU.FP.BA[[i]][,2]
+  names(footPos[[i]]) <- OU.FP.BA[[i]][,1]
+  footPosRecon[[i]] <- rerootingMethod(stochasticMammal[[i]], footPos[[i]], model = 'ARD')
+  footPosStochMam[[i]] <- stochasticMammal[[i]]
+  footPosStochMam[[i]]$node.label <- vector() 
+  
+}
+
+for (i in 1:stochasticMammal[[i]]$Nnode) footPosStochMam[[i]]$node.label[i] <- names(footPosRecon[[i]]$marginal.anc[i,])[footPosRecon[[i]]$marginal.anc[i,] == max(footPosRecon[[i]]$marginal.anc[i,])] 
+
+nodecolr <- rep('green', length = ancStateMam$Nnode)
+nodecolr[footPosAncStateMam$node.label == 'Unguligrade'] <- 'purple' # 9-21 did I accidentally delete creation of variable footPosAncStateMam from previous version of code or did I rename the variable footPosAncStateMam to footPosStochMam everywhere except here? look into what this section of code is doing and fix for BA and BR sections. 
+nodecolr[footPosAncStateMam$node.label == 'Plantigrade'] <- 'blue'
+plot(ancStateMam, show.tip.label=F)
+tiplabels(pch=16, col=colr)
+nodelabels(pch=16, col=nodecolr)
+
+## Fit models using set of simmap stochastically mapped trees (9-21 work on this)
+simResBA <- list()
+
+resmat <- matrix(nrow=21, ncol=6) # set up an empty results matrix for all the parameter estimates you are interested in, for each tree a new matrix will be created
+colnames(resmat) <- c('BM1', 'OU1', 'BMS', 'OUM', 'OUMA', 'OUMV')
+row.names(resmat) <- c('loglik', 'AICc', 'Dig_alph', 'Dig_alphSE', 'Dig_sigma', 'Dig_sigmaSE', 'Plant_alph', 'Plant_alphSE', 'Plant_sigma', 'Plant_sigmaSE', 'Ung_alph', 'Ung_alphSE', 'Ung_sigma', 'Ung_sigmaSE', 'Dig_theta', 'Dig_thetaSE', 'Plant_theta', 'Plant_thetaSE', 'Ung_theta', 'Ung_thetaSE', 'MLStatus')
+
+#for(j in 3:6){ # running OU models first
+tmpres <- OUwie(ancStateMam, OU.FP.BA, model = 'OUM', simmap.tree=TRUE, root.station=TRUE, diagn=T, get.root.theta = FALSE)
+```
+
+# Figures
+```{r plot mean ratio by mean angle with convex polygons colored by foot posture, fig.width=10, fig.height=8, fig.align = 'center', echo = FALSE}
+pdf(file = "morphospaceFP.pdf", width = 10, height = 10)
+X <- mydata.FP[mydata.FP$FootPosture == "Plantigrade", c(6,7)]
+plot(X, col = 'brown1', main = "Morphospace of Mean Bending Angle and Ratio by Foot Posture", xlab = 'Average Bending Angle', ylab = 'Average Bending Ratio', xlim = c(50, 160), ylim = c(0, 1.0))
+hpts <- chull(X)
+hpts <- c(hpts, hpts[1])
+lines(X[hpts, ], col = 'brown1')
+Y <- mydata.FP[mydata.FP$FootPosture == "Unguligrade", c(6,7)]
+hptsY <- chull(Y)
+hptsY <- c(hptsY, hptsY[1])
+points(Y, col = 'orchid2')
+lines(Y[hptsY, ], col = 'orchid2')
+Z <- mydata.FP[mydata.FP$FootPosture == "Digitigrade", c(6,7)]
+hptsZ <- chull(Z)
+hptsZ <- c(hptsZ, hptsZ[1])
+points(Z, col = 'royalblue4')
+lines(Z[hptsZ, ], col = 'royalblue4') 
+legend("topleft", legend=c("Plantigrade", "Unguligrade", "Digitigrade"),
+       col=c("brown1", "orchid2", "royalblue4"), lty = 1)
+dev.off()
+
+# same morphospace code but for four foot posture groups (birds separated)
+pdf(file = "morphospaceFP.bird.pdf", width = 10, height = 10)
+X <- mydata.FP[mydata.FP$FootPosture2Dig == "Plantigrade", c(6,7)]
+plot(X, col = 'brown1', main = "Morphospace of Mean Bending Angle and Ratio by Foot Posture", xlab = 'Average Bending Angle', ylab = 'Average Bending Ratio', xlim = c(50, 160), ylim = c(0, 1.0))
+hpts <- chull(X)
+hpts <- c(hpts, hpts[1])
+lines(X[hpts, ], col = 'brown1')
+Y <- mydata.FP[mydata.FP$FootPosture2Dig == "Unguligrade", c(6,7)]
+hptsY <- chull(Y)
+hptsY <- c(hptsY, hptsY[1])
+points(Y, col = 'orchid2')
+lines(Y[hptsY, ], col = 'orchid2')
+Z <- mydata.FP[mydata.FP$FootPosture2Dig == "Dbird", c(6,7)]
+hptsZ <- chull(Z)
+hptsZ <- c(hptsZ, hptsZ[1])
+points(Z, col = 'royalblue4')
+lines(Z[hptsZ, ], col = 'royalblue4') 
+A <- mydata.FP[mydata.FP$FootPosture2Dig == "Dother", c(6,7)]
+hptsA <- chull(A)
+hptsA <- c(hptsA, hptsA[1])
+points(A, col = 'green')
+lines(A[hptsA, ], col = 'green') 
+legend("topleft", legend=c("Plantigrade", "Unguligrade", "Digitigrade (bird)", "Digitigrade (other)"),
+       col=c("brown1", "orchid2", "royalblue4", "green"), lty = 1)
+dev.off()
+```
+
+```{r bending ratio boxplots by foot posture}
+ggplot(data = mydata.FP, mapping = aes(x = FootPosture, y = avgRatio, fill = FootPosture)) + 
+  geom_boxplot() + 
+  scale_fill_manual(values = c("royalblue4", "brown1", "orchid2"), labels=c("Digitigrade", "Plantigrade", "Unguligrade")) + 
+    labs(x = "Foot posture", y = "Mean Ratio", fill = "Foot Posture") 
+
+# same boxplot code but for four foot postures
+```
+
+
